@@ -6,9 +6,9 @@ A production-grade distributed system built with **Spring Boot**, **Apache Kafka
 
 ## What This System Does
 
-This system processes e-commerce orders across 4 independent microservices using Kafka as the message bus. Each service is independently deployable, owns its own data, and communicates exclusively through events — no direct REST calls between services.
+This system processes e-commerce orders across 4 independent microservices using Kafka as the message bus. Each service is independently deployable, owns its own data, and communicates exclusively through events; no direct REST calls between services.
 
-A single order flows through stock reservation, payment processing, and real-time analytics — all asynchronously, with full compensation logic if anything fails.
+A single order flows through stock reservation, payment processing, and real-time analytics, all asynchronously, with full compensation logic if anything fails.
 
 ---
 
@@ -33,7 +33,7 @@ Client
          │ Kafka: stock-reserved topic
          ▼
 ┌──────────────────┐
-│ payment-service  │  Processes payment (only after stock confirmed)
+│ payment-service  │  Processes payment (only after stock is confirmed)
 │   port: 8082     │  Publishes PAYMENT_SUCCESS or PAYMENT_FAILED
 └────────┬─────────┘
          │ Kafka: payment-success / payment-failed topics
@@ -97,19 +97,19 @@ POST /orders
 ## Key Engineering Concepts Implemented
 
 ### 1. SAGA Pattern (Choreography-based)
-Each service reacts to events and publishes its own — no central orchestrator. Compensating transactions automatically undo previous steps when a later step fails. Stock is released if payment fails. Payment is never attempted if stock fails.
+Each service reacts to events and publishes its own; no central orchestrator. Compensating transactions automatically undo previous steps when a later step fails. Stock is released if payment fails. Payment is never attempted if stock fails.
 
 ### 2. Reserve-Commit-Release Inventory
 Stock is reserved (not deducted) when an order arrives. It is committed (reservation cleared) when payment succeeds, or released (returned to available) when payment fails. This prevents overselling without locking inventory unnecessarily.
 
 ### 3. Redis Idempotency
-Kafka guarantees at-least-once delivery — the same message can be delivered more than once. Before processing any message, each service checks Redis for a key in the format `service:eventType:orderId`. If the key exists, the message is a duplicate and is skipped. Keys expire after 24 hours automatically.
+Kafka guarantees at-least-once delivery; the same message can be delivered more than once. Before processing any message, each service checks Redis for a key in the format `service:eventType:orderId`. If the key exists, the message is a duplicate and is skipped. Keys expire after 24 hours automatically.
 
 ### 4. Dead Letter Queue (DLQ)
 Messages that fail processing after 3 retries (with 2-second backoff) are automatically routed to a `*-dlt` topic. A DLT consumer logs the full message details for manual inspection and replay. No message is ever silently lost.
 
 ### 5. Redis Caching for Analytics
-The `/analytics/summary` endpoint checks Redis before hitting PostgreSQL. On cache miss, it queries the DB and caches the result for 30 seconds. Every new event invalidates the cache, ensuring freshness without sacrificing performance.
+The `/analytics/summary` endpoint checks Redis before hitting PostgreSQL. On a cache miss, it queries the DB and caches the result for 30 seconds. Every new event invalidates the cache, ensuring freshness without sacrificing performance.
 
 ### 6. Kafka Partition Strategy
 All topics are configured with 3 partitions. Messages are keyed by `orderId`, ensuring all events for the same order go to the same partition (guaranteed ordering per order). With 3 partitions, running 3 consumer instances gives 3x horizontal throughput with zero code changes.
@@ -208,10 +208,10 @@ curl http://localhost:8084/analytics/summary
 ## Design Decisions & Tradeoffs
 
 ### Why Kafka over REST calls between services?
-Direct REST calls create tight coupling — if payment-service is down, order-service fails. Kafka decouples producers from consumers. A message published to Kafka is guaranteed to be delivered even if the consumer is temporarily unavailable. This gives us fault tolerance and independent deployability.
+Direct REST calls create tight coupling; if the payment service is down, the order service fails. Kafka decouples producers from consumers. A message published to Kafka is guaranteed to be delivered even if the consumer is temporarily unavailable. This gives us fault tolerance and independent deployability.
 
 ### Why choreography SAGA over orchestration?
-An orchestrator (like a central saga manager) is a single point of failure and becomes a bottleneck. Choreography distributes the decision-making — each service knows what to do when it receives an event. This scales better and is more resilient.
+An orchestrator (like a central saga manager) is a single point of failure and becomes a bottleneck. Choreography distributes the decision-making; each service knows what to do when it receives an event. This scales better and is more resilient.
 
 ### Why Redis for idempotency keys over PostgreSQL?
 A PostgreSQL lookup on every Kafka message would add significant latency and DB load. Redis lookups are microsecond-level in-memory operations. With a 24-hour TTL, keys auto-expire without any cleanup job needed.
@@ -220,10 +220,10 @@ A PostgreSQL lookup on every Kafka message would add significant latency and DB 
 Charging a customer's card for an out-of-stock item is a poor user experience and requires a refund flow. Checking stock first means payment is only attempted when fulfillment is guaranteed. This reduces unnecessary payment gateway calls and simplifies the compensation logic.
 
 ### CAP Theorem implications
-This system is **AP (Available + Partition Tolerant)**. Each service can continue operating independently even if other services are down. The tradeoff is eventual consistency — an order's status may be `NEW` briefly before it becomes `CONFIRMED` or `CANCELLED`. This is acceptable for an order processing system where a few hundred milliseconds of inconsistency has no business impact.
+This system is **AP (Available + Partition Tolerant)**. Each service can continue operating independently even if other services are down. The tradeoff is eventual consistency; an order's status may be `NEW` briefly before it becomes `CONFIRMED` or `CANCELLED`. This is acceptable for an order processing system where a few hundred milliseconds of inconsistency has no business impact.
 
 ### Kafka vs RabbitMQ
-Kafka was chosen because it retains messages for configurable periods (7 days by default) allowing replay, supports high-throughput partitioned consumption, and natively supports the consumer group model needed for horizontal scaling. RabbitMQ is better suited for task queues with complex routing but doesn't provide the same replay and retention guarantees.
+Kafka was chosen because it retains messages for configurable periods (7 days by default), allowing replay, supports high-throughput partitioned consumption, and natively supports the consumer group model needed for horizontal scaling. RabbitMQ is better suited for task queues with complex routing, but doesn't provide the same replay and retention guarantees.
 
 ---
 
